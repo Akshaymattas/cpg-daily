@@ -1,0 +1,41 @@
+name: CPG Europe Daily build
+
+on:
+  schedule:
+    - cron: "30 4 * * *"   # 04:30 UTC = 06:30 CET = 10:00 IST, every day
+  workflow_dispatch:        # lets you trigger it manually from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install feedparser
+
+      - name: Collect news and build page
+        run: python collect_news.py
+
+      - name: Commit updated site
+        run: |
+          git config user.name "cpg-daily-bot"
+          git config user.email "actions@github.com"
+          git add docs/
+          git commit -m "Daily edition $(date -u +%F)" || echo "Nothing new"
+          git push
+
+      - name: Send email digest
+        if: ${{ env.SMTP_USER != '' }}
+        env:
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_TO:   ${{ secrets.MAIL_TO }}
+        run: python send_email.py
