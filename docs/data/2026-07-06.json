@@ -110,15 +110,6 @@
    "score": 2
   },
   {
-   "title": "Inside the Mind of a European Supermarket Buyer",
-   "link": "https://internationalsupermarketnews.com/inside-the-mind-of-a-european-supermarket-buyer/",
-   "summary": "A Simulated Interview by Riad Beladi, Publisher, International Supermarket News Behind every successful supermarket shelf is a buyer making hundreds of decisions each week. From selecting innovative products and negotiating with suppliers to responding to changing consumer\u2026",
-   "source": "International Supermarket News",
-   "time": "2026-07-06T10:10:32+00:00",
-   "category": "Retail & Distribution",
-   "score": 2
-  },
-  {
    "title": "Why and how Unilever sells on TikTok Shop",
    "link": "https://www.retaildetail.eu/news/beauty-care/unilever-will-also-start-selling-on-tiktok-shop-in-the-benelux/",
    "summary": "Unilever is preparing to sell through TikTok Shop now that the platform is also active in the Benelux. The company does not expect to see immediate returns, but does see room for further growth in social commerce.",
@@ -191,33 +182,6 @@
    "score": 1
   },
   {
-   "title": "Co-op Extends Overnight Grocery Delivery to 4 a.m. as World Cup Sparks Late-Night Shopping",
-   "link": "https://internationalsupermarketnews.com/co-op-extends-overnight-grocery-delivery-to-4-a-m-as-world-cup-sparks-late-night-shopping/",
-   "summary": "LONDON \u2014 UK supermarket chain Co-op has expanded its grocery delivery service until 4 a.m., responding to increased late-night demand as football fans stay up to watch FIFA World Cup matches. The temporary extension is designed to help customers stock up on snacks, drinks and\u2026",
-   "source": "International Supermarket News",
-   "time": "2026-07-06T09:54:40+00:00",
-   "category": "Retail & Distribution",
-   "score": 1
-  },
-  {
-   "title": "Italy\u2019s Coffee Market: Consumption Trends, Leading Suppliers and Supermarket Opportunities",
-   "link": "https://internationalsupermarketnews.com/italys-coffee-market-consumption-trends-leading-suppliers-and-supermarket-opportunities/",
-   "summary": "Research by International Supermarket News (ISN) Italy remains one of the world\u2019s most influential coffee markets, where coffee is more than a beverage\u2014it\u2019s an integral part of daily life and national culture. Despite its population of around 59 million, Italy ranks among\u2026",
-   "source": "International Supermarket News",
-   "time": "2026-07-06T09:58:12+00:00",
-   "category": "Retail & Distribution",
-   "score": 1
-  },
-  {
-   "title": "Retail Crime in Europe: The Five Countries Facing the Greatest Challenge",
-   "link": "https://internationalsupermarketnews.com/retail-crime-in-europe-the-five-countries-facing-the-greatest-challenge/",
-   "summary": "Retail crime has become one of the most pressing challenges facing Europe\u2019s supermarket industry. What was once considered an issue of petty shoplifting has evolved into a sophisticated and costly problem involving organised criminal gangs, violence against retail employees,\u2026",
-   "source": "International Supermarket News",
-   "time": "2026-07-06T10:46:52+00:00",
-   "category": "Retail & Distribution",
-   "score": 1
-  },
-  {
    "title": "Spain beer export volumes rise in 2025",
    "link": "https://www.just-drinks.com/news/spain-beer-exports-2025/",
    "summary": "Exports of Spanish beer grew in volume terms last year, while the country's domestic sales volumes dipped, new findings show.",
@@ -234,24 +198,6 @@
    "time": "2026-07-06T14:31:48+00:00",
    "category": "Product & Innovation",
    "score": 1
-  },
-  {
-   "title": "Waitrose Invests \u00a320 Million to Cut Prices on More Than 160 Everyday Grocery Items",
-   "link": "https://internationalsupermarketnews.com/waitrose-invests-20-million-to-cut-prices-on-more-than-160-everyday-grocery-items/",
-   "summary": "LONDON \u2014 Waitrose has announced a major \u00a320 million investment to reduce the prices of more than 160 own-brand grocery products, aiming to help customers manage rising household costs while maintaining the retailer\u2019s reputation for premium quality. The latest price reduction\u2026",
-   "source": "International Supermarket News",
-   "time": "2026-07-06T09:49:01+00:00",
-   "category": "M&A & Investments",
-   "score": 0
-  },
-  {
-   "title": "Australia\u2019s Anti-Price-Gouging Law Takes Effect, Targeting Major Supermarkets",
-   "link": "https://internationalsupermarketnews.com/australias-anti-price-gouging-law-takes-effect-targeting-major-supermarkets/",
-   "summary": "CANBERRA \u2014 Australia\u2019s new legislation aimed at preventing excessive pricing by the country\u2019s largest supermarket chains has officially come into force, marking one of the most significant reforms to grocery market regulation in recent years. The new law, effective this week,\u2026",
-   "source": "International Supermarket News",
-   "time": "2026-07-06T09:51:23+00:00",
-   "category": "Retail & Distribution",
-   "score": 0
   },
   {
    "title": "Aldi gifts first 500 shoppers \u00a35 voucher after England win",
@@ -435,9 +381,6 @@
   }
  ],
  "failed_feeds": [
-  "https://www.foodbev.com/feed",
-  "https://www.foodmanufacture.co.uk/rss/news",
-  "https://www.foodnavigator.com/rss/news",
-  "https://www.cosmeticsdesign-europe.com/rss/news"
+  "https://internationalsupermarketnews.com/feed"
  ]
 }
