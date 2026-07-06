@@ -1,0 +1,22 @@
+# European CPG news sources — one RSS feed URL per line.
+# Lines starting with # are ignored. Add/remove freely; the script
+# skips any feed that fails and lists it in the run log.
+
+# --- Food & Beverage (Europe) ---
+https://www.foodbev.com/feed
+https://www.esmmagazine.com/feed
+https://www.just-food.com/feed/
+https://www.just-drinks.com/feed/
+https://www.foodmanufacture.co.uk/rss/news
+https://www.foodnavigator.com/rss/news
+
+# --- Retail & Distribution (Europe) ---
+https://www.retaildetail.eu/feed/
+https://internationalsupermarketnews.com/feed
+https://www.retailgazette.co.uk/feed/
+
+# --- Personal care / Home care ---
+https://www.cosmeticsdesign-europe.com/rss/news
+
+# --- General FMCG / business wires (filtered by keywords in the script) ---
+https://www.fooddive.com/feeds/news/
