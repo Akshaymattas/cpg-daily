@@ -8,18 +8,27 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: daily-build
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Set at job level so the email step's `if:` can see it
+    # (a step's own env isn't available to its `if:`).
+    env:
+      SMTP_USER: ${{ secrets.SMTP_USER }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: pip
 
       - name: Install dependencies
-        run: pip install feedparser
+        run: pip install -r requirements.txt
 
       - name: Collect news and build page
         run: python collect_news.py
@@ -30,12 +39,13 @@ jobs:
           git config user.email "actions@github.com"
           git add docs/
           git commit -m "Daily edition $(date -u +%F)" || echo "Nothing new"
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
           git push
 
       - name: Send email digest
         if: ${{ env.SMTP_USER != '' }}
         env:
-          SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           MAIL_TO:   ${{ secrets.MAIL_TO }}
+          SITE_URL:  ${{ vars.SITE_URL }}
         run: python send_email.py

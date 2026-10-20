@@ -6,8 +6,13 @@ GitHub Pages and optionally emailed each morning.
 
 How it works: a scheduled GitHub Action runs `collect_news.py` every day,
 which pulls the RSS feeds in `feeds.txt`, keeps the last ~24 hours of
-stories, groups them into sections, and writes a fresh `docs/index.html`
-plus a dated archive copy and a JSON data file.
+stories (skipping anything already published in the last few editions),
+groups them into sections, and writes a fresh `docs/index.html` plus a
+dated archive copy, a JSON data file, and a search index.
+
+The site has instant search (this edition or every past edition), section
+filters, an archive browsable by month, and a light/dark theme. Search
+links are shareable, e.g. `index.html?q=unilever&all=1`.
 
 ## Setup (one time, ~15 minutes)
 
@@ -44,15 +49,24 @@ homepage URL, or look for an RSS icon on the site.
    - `MAIL_TO`   = recipient1@x.com, recipient2@y.com
 3. That's it — the workflow's email step activates automatically.
    (Gmail allows ~500 recipients/day, plenty for a team list.)
+4. The email links to `https://<owner>.github.io/<repo>/`. If your site
+   lives elsewhere, add a repository **variable** (not secret) `SITE_URL`.
 
 ## Tuning
 
 - Schedule: edit the `cron:` line in `.github/workflows/daily.yml`
   (times are UTC).
 - Sections & keywords: edit `CATEGORIES` and `TOP_STORY_WORDS` at the
-  top of `collect_news.py`.
-- Look & feel: edit the `CSS` block in `collect_news.py`.
-- Lookback window: set `LOOKBACK_HOURS` (default 26).
+  top of `collect_news.py`. Keywords match whole words; end one with `*`
+  to match word starts (`sustainab*`). Sections are checked in order and
+  the first match wins.
+- Look & feel: edit `docs/assets/style.css` (colours are variables at the
+  top) and `docs/assets/app.js` (search & filters).
+- Lookback window: set `LOOKBACK_HOURS` (default 26). Repeats from the
+  last `DEDUP_DAYS` editions (default 3) are dropped.
+- After changing sections or the page layout, run
+  `python collect_news.py --rebuild` to re-render every archive page
+  and the search index from `docs/data/`.
 
 ## Costs
 
