@@ -6,11 +6,16 @@
 https://www.esmmagazine.com/feed
 https://www.just-food.com/feed/
 https://www.just-drinks.com/feed/
+https://www.foodnavigator.com/arc/outboundfeeds/rss/
+
+# --- Beauty & Personal Care (Europe) ---
+https://www.cosmeticsdesign-europe.com/arc/outboundfeeds/rss/
 
 # --- Retail & Distribution (Europe) ---
 https://www.retaildetail.eu/feed/
 https://internationalsupermarketnews.com/feed
 https://www.retailgazette.co.uk/feed/
+https://www.thegrocer.co.uk/rss
 
 # --- General FMCG / business wires (filtered by keywords in the script) ---
 https://www.fooddive.com/feeds/news/

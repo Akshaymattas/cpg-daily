@@ -3,81 +3,141 @@
 CPG Europe Daily — news collector & page generator.
 
 Reads RSS feeds from feeds.txt, keeps items from the last LOOKBACK_HOURS,
-filters/categorizes for CPG relevance, then writes:
+drops stories already published in recent editions, filters/categorizes
+for CPG relevance, then writes:
   docs/index.html            -> today's live page (GitHub Pages serves this)
   docs/archive/YYYY-MM-DD.html
   docs/archive/index.html    -> archive listing
   docs/data/YYYY-MM-DD.json  -> raw data (used by the optional emailer)
+  docs/search-index.json     -> every edition's stories, for site search
+
+Look & feel lives in docs/assets/style.css and docs/assets/app.js.
 
 No API keys required. Only dependency: feedparser.
+
+  python collect_news.py            # collect today's edition
+  python collect_news.py --rebuild  # re-render all pages from docs/data
 """
 
+import calendar
 import feedparser
 import json
 import html
 import re
 import os
+import sys
 import time
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ----------------------------- settings ------------------------------------
 
 LOOKBACK_HOURS = int(os.environ.get("LOOKBACK_HOURS", "26"))  # small overlap
+DEDUP_DAYS = 3            # skip stories that appeared in the last N editions
 MAX_ITEMS_PER_SECTION = 12
+TOP_STORY_MIN_SCORE = 4
+MAX_TOP_STORIES = 5
 SITE_TITLE = "CPG Europe Daily"
 BASE = Path(__file__).parent
 DOCS = BASE / "docs"
 
+# Keywords match whole words only, so "ban" doesn't match "bank" or
+# "urban". End a keyword with * to match any word starting with it
+# (e.g. "sustainab*" matches sustainable, sustainability).
+
 # Category keyword rules (checked in order; first match wins)
 CATEGORIES = [
     ("M&A & Investments", [
-        "acquisition", "acquires", "acquired", "merger", "merges", "takeover",
-        "buyout", "stake", "invests", "investment", "funding", "raises",
-        "series a", "series b", "venture", "divest", "sells its", "to buy",
-        "joint venture", "ipo", "valuation", "private equity",
-    ]),
-    ("Product & Innovation", [
-        "launch", "launches", "unveils", "debuts", "new range", "new product",
-        "introduces", "innovation", "reformulat", "flavour", "flavor",
-        "packaging redesign", "limited edition", "rebrand", "npd",
-    ]),
-    ("Retail & Distribution", [
-        "supermarket", "retailer", "retail", "store", "stores", "grocer",
-        "e-commerce", "ecommerce", "online sales", "distribution", "listing",
-        "shelf", "discounter", "hypermarket", "convenience", "wholesale",
-        "supply chain", "logistics", "carrefour", "tesco", "aldi", "lidl",
-        "sainsbury", "ahold", "rewe", "edeka", "auchan", "mercadona",
+        "acquisition", "acquisitions", "acquires", "acquired", "acquire",
+        "merger", "merges", "takeover", "buyout", "stake", "invests",
+        "investment", "investor*", "funding", "raises", "series a",
+        "series b", "venture capital", "divest*", "sells its", "to buy",
+        "joint venture", "ipo", "valuation", "private equity", "buys",
+        "sells", "sold", "snaps up", "bid", "offer for",
     ]),
     ("Regulatory & Sustainability", [
-        "regulation", "regulator", "eu commission", "european commission",
-        "ban", "law", "legislation", "compliance", "recall", "efsa",
-        "sustainab", "recycl", "emissions", "carbon", "packaging waste",
-        "deforestation", "eudr", "labelling", "labeling", "health claim",
-        "tariff", "tax",
+        "regulation*", "regulator*", "eu commission", "european commission",
+        "ban", "bans", "banned", "law", "laws", "legislation", "compliance",
+        "recall", "recalls", "recalled", "efsa", "sustainab*", "recycl*",
+        "emissions", "carbon", "packaging waste", "deforestation", "eudr",
+        "labelling", "labeling", "health claim*", "tariff*", "tax", "taxes",
+        "hfss", "net zero",
+    ]),
+    ("Product & Innovation", [
+        "launch", "launches", "launched", "unveils", "debuts", "new range",
+        "new product", "introduces", "innovation", "reformulat*", "flavour*",
+        "flavor*", "packaging redesign", "limited edition", "rebrand*", "npd",
+    ]),
+    ("Results & People", [
+        "results", "earnings", "revenue*", "sales growth", "sales fall*",
+        "sales rise*", "profit*", "loss", "losses", "turnover", "guidance",
+        "forecast*", "outlook", "h1", "h2", "q1", "q2", "q3", "q4",
+        "half-year", "full-year", "quarter*", "trading update",
+        "ceo", "cfo", "coo", "chairman", "chairperson", "chief executive",
+        "appoint*", "names", "hires", "steps down", "resigns", "successor",
+        "managing director", "job cuts", "cut costs", "cost cuts", "layoffs",
+        "redundanc*",
+    ]),
+    ("Retail & Distribution", [
+        "supermarket*", "retailer*", "store", "stores", "grocer*",
+        "e-commerce", "ecommerce", "online sales", "distribution", "listing*",
+        "shelf", "shelves", "discounter*", "hypermarket*", "convenience",
+        "wholesale*", "supply chain", "logistics", "carrefour", "tesco",
+        "aldi", "lidl", "sainsbury*", "ahold", "rewe", "edeka", "auchan",
+        "mercadona", "asda", "morrisons", "delhaize", "jumbo", "colruyt",
     ]),
 ]
 FALLBACK_CATEGORY = "Other Headlines"
 
-# Words that boost an item into "Top Stories"
+# Words that boost an item into "Top Stories" (+2 each)
 TOP_STORY_WORDS = [
-    "acquisition", "acquires", "merger", "takeover", "billion", "€", "recall",
-    "ceo", "closes", "shuts", "bankrupt", "strike", "lawsuit", "record",
-    "nestle", "nestlé", "unilever", "danone", "p&g", "procter", "coca-cola",
-    "pepsico", "mondelez", "heineken", "ab inbev", "l'oreal", "l'oréal",
-    "henkel", "carlsberg", "diageo", "ferrero", "lactalis", "kraft",
+    "acquisition", "acquires", "merger", "takeover", "billion", "recall",
+    "ceo", "closes", "shuts", "bankrupt*", "insolven*", "strike", "lawsuit",
+    "record", "nestle", "nestlé", "unilever", "danone", "p&g", "procter",
+    "coca-cola", "pepsico", "mondelez", "heineken", "ab inbev", "l'oreal",
+    "l'oréal", "henkel", "carlsberg", "diageo", "ferrero", "lactalis",
+    "kraft", "reckitt", "haleon", "beiersdorf", "kenvue",
 ]
 
-# Europe relevance signals (used to score, not hard-filter — most feeds
-# are already EU-focused)
+# Billion-scale amounts like "€1.8bn" or "1.8-billion-euro" (+2)
+BIG_MONEY = re.compile(r"[€£$]\s?\d[\d.,]*\s?bn\b|\d[\d.,]*[\s-]?billion", re.I)
+
+# Europe relevance signals (+1 each; used to score, not hard-filter —
+# most feeds are already EU-focused)
 EUROPE_WORDS = [
-    "europe", "european", "eu ", " uk", "britain", "germany", "france",
-    "spain", "italy", "netherlands", "belgium", "poland", "ireland",
-    "scandinav", "nordic", "switzerland", "austria", "portugal", "denmark",
-    "sweden", "norway", "finland", "greece", "czech", "romania", "hungary",
+    "europe", "european", "eu", "uk", "britain", "british", "germany",
+    "german", "france", "french", "spain", "spanish", "italy", "italian",
+    "netherlands", "dutch", "belgium", "belgian", "poland", "polish",
+    "ireland", "irish", "scandinav*", "nordic", "switzerland", "swiss",
+    "austria", "portugal", "portuguese", "denmark", "danish", "sweden",
+    "swedish", "norway", "finland", "greece", "czech", "romania", "hungary",
 ]
+
+
+def keyword_regex(words):
+    parts = []
+    for w in words:
+        tail = r"\w*" if w.endswith("*") else ""
+        parts.append(re.escape(w.rstrip("*").lower()) + tail)
+    return re.compile(r"(?<!\w)(?:" + "|".join(parts) + r")(?!\w)")
+
+
+CATEGORY_RES = [(name, keyword_regex(words)) for name, words in CATEGORIES]
+TOP_STORY_RE = keyword_regex(TOP_STORY_WORDS)
+EUROPE_RE = keyword_regex(EUROPE_WORDS)
+SECTION_ORDER = [name for name, _ in CATEGORIES] + [FALLBACK_CATEGORY]
 
 # ----------------------------- collection ----------------------------------
+
+HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/124.0 Safari/537.36 "
+                   "CPG-Daily-digest"),
+    "Accept": "application/rss+xml, application/atom+xml, "
+              "application/xml;q=0.9, text/xml;q=0.9, */*;q=0.8",
+    "Accept-Language": "en-GB,en;q=0.9",
+}
 
 
 def load_feeds():
@@ -87,6 +147,24 @@ def load_feeds():
         if line and not line.startswith("#"):
             feeds.append(line)
     return feeds
+
+
+def fetch_feed(url, attempts=3):
+    """Download and parse a feed, retrying transient failures."""
+    last = None
+    for n in range(attempts):
+        try:
+            req = urllib.request.Request(url, headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                parsed = feedparser.parse(resp.read())
+            if parsed.entries:
+                return parsed
+            last = parsed.get("bozo_exception") or "no entries"
+        except Exception as ex:
+            last = ex
+        if n < attempts - 1:
+            time.sleep(2 ** (n + 1))
+    raise RuntimeError(str(last))
 
 
 def clean_text(raw, limit=280):
@@ -100,36 +178,66 @@ def clean_text(raw, limit=280):
 def entry_time(entry):
     for key in ("published_parsed", "updated_parsed"):
         t = entry.get(key)
-        if t:
-            return datetime.fromtimestamp(time.mktime(t), tz=timezone.utc)
+        if t:  # feedparser gives UTC struct_time
+            return datetime.fromtimestamp(calendar.timegm(t), tz=timezone.utc)
     return None
+
+
+def title_key(title):
+    return re.sub(r"[^a-z0-9]", "", title.lower())[:70]
 
 
 def categorize(text):
     low = text.lower()
-    for name, words in CATEGORIES:
-        if any(w in low for w in words):
+    for name, rx in CATEGORY_RES:
+        if rx.search(low):
             return name
     return FALLBACK_CATEGORY
 
 
 def score(text):
     low = text.lower()
-    s = sum(2 for w in TOP_STORY_WORDS if w in low)
-    s += sum(1 for w in EUROPE_WORDS if w in low)
+    s = 2 * len(set(TOP_STORY_RE.findall(low)))
+    s += 2 if BIG_MONEY.search(low) else 0
+    s += len(set(EUROPE_RE.findall(low)))
     return s
 
 
-def collect():
+def classify(item):
+    blob = f"{item['title']} {item['summary']}"
+    item["category"] = categorize(blob)
+    item["score"] = score(blob)
+    return item
+
+
+def sort_items(items):
+    # Highest score first; within a score, newest first
+    items.sort(key=lambda x: x["time"] or "", reverse=True)
+    items.sort(key=lambda x: -x["score"])
+    return items
+
+
+def recent_keys(today_stamp):
+    """Links and title keys from the previous DEDUP_DAYS editions."""
+    links, titles = set(), set()
+    files = sorted(p for p in (DOCS / "data").glob("*.json")
+                   if p.stem < today_stamp)[-DEDUP_DAYS:]
+    for p in files:
+        for it in json.loads(p.read_text(encoding="utf-8"))["items"]:
+            if it.get("link"):
+                links.add(it["link"])
+            titles.add(title_key(it["title"]))
+    return links, titles
+
+
+def collect(today_stamp):
     cutoff = datetime.now(timezone.utc) - timedelta(hours=LOOKBACK_HOURS)
-    items, seen, failures = [], set(), []
+    old_links, seen = recent_keys(today_stamp)
+    items, failures, repeats = [], [], 0
 
     for url in load_feeds():
         try:
-            parsed = feedparser.parse(url, request_headers={
-                "User-Agent": "Mozilla/5.0 (CPG-Daily digest bot)"})
-            if parsed.bozo and not parsed.entries:
-                raise RuntimeError(str(parsed.get("bozo_exception", "no entries")))
+            parsed = fetch_feed(url)
             source = clean_text(parsed.feed.get("title", url), 80)
             for e in parsed.entries[:40]:
                 when = entry_time(e)
@@ -138,160 +246,271 @@ def collect():
                 title = clean_text(e.get("title", ""), 200)
                 if not title:
                     continue
-                key = re.sub(r"[^a-z0-9]", "", title.lower())[:70]
-                if key in seen:
+                key = title_key(title)
+                link = e.get("link", "")
+                if key in seen or link in old_links:
+                    repeats += 1
                     continue
                 seen.add(key)
                 summary = clean_text(e.get("summary", e.get("description", "")))
-                blob = f"{title} {summary}"
-                items.append({
+                items.append(classify({
                     "title": title,
-                    "link": e.get("link", ""),
+                    "link": link,
                     "summary": summary,
                     "source": source,
                     "time": when.isoformat() if when else None,
-                    "category": categorize(blob),
-                    "score": score(blob),
-                })
+                }))
             print(f"OK   {url} -> {len(parsed.entries)} entries")
         except Exception as ex:
             failures.append(url)
             print(f"FAIL {url} -> {ex}")
 
-    items.sort(key=lambda x: (-x["score"], x["time"] or ""), reverse=False)
-    items.sort(key=lambda x: -x["score"])
-    return items, failures
+    print(f"Skipped {repeats} duplicate/already-published stories.")
+    return sort_items(items), failures
 
 
 # ----------------------------- page rendering ------------------------------
 
-CSS = """
-:root{--ink:#122B22;--paper:#F5F6F2;--card:#FFFFFF;--green:#0E3B2E;
---tag:#FFD84D;--line:#D8DDD4;--muted:#5C6B60;--accent:#C8451F;}
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--paper);color:var(--ink);
-font:16px/1.55 "Segoe UI",system-ui,-apple-system,sans-serif}
-a{color:inherit}
-.wrap{max-width:880px;margin:0 auto;padding:0 20px 60px}
-header{background:var(--green);color:#F3F1E7;padding:34px 0 26px;
-border-bottom:6px solid var(--tag)}
-header .wrap{padding-bottom:0}
-.masthead{font-family:"Arial Black","Segoe UI",sans-serif;
-font-size:clamp(26px,5vw,44px);letter-spacing:.02em;line-height:1.05;
-text-transform:uppercase}
-.datebadge{display:inline-block;background:var(--tag);color:#122B22;
-font-weight:700;font-size:14px;padding:4px 12px;margin-top:12px;
-transform:rotate(-1.2deg);box-shadow:2px 2px 0 rgba(0,0,0,.25)}
-.subline{margin-top:10px;font-size:14px;opacity:.85}
-nav{font-size:13px;margin-top:14px}
-nav a{color:#F3F1E7;opacity:.9;margin-right:16px}
-h2.section{margin:38px 0 14px;font-size:14px;letter-spacing:.14em;
-text-transform:uppercase;background:var(--ink);color:var(--tag);
-display:inline-block;padding:5px 14px}
-.item{background:var(--card);border:1px solid var(--line);
-border-left:4px solid var(--green);padding:16px 18px;margin-bottom:12px}
-.item.top{border-left-color:var(--accent)}
-.item h3{font-size:17px;line-height:1.35;margin-bottom:6px}
-.item h3 a{text-decoration:none}
-.item h3 a:hover{text-decoration:underline}
-.item p{font-size:14px;color:var(--muted);margin-bottom:8px}
-.meta{font-size:12px;color:var(--muted);text-transform:uppercase;
-letter-spacing:.06em}
-.meta b{color:var(--green)}
-footer{margin-top:50px;font-size:12px;color:var(--muted);
-border-top:1px solid var(--line);padding-top:14px}
-.empty{padding:30px;text-align:center;color:var(--muted)}
-"""
+def esc(s):
+    return html.escape(s or "", quote=True)
 
 
-def render_item(it, top=False):
-    t = ""
+def slug(name):
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def pretty_date(stamp):
+    return datetime.strptime(stamp, "%Y-%m-%d").strftime("%A, %d %B %Y")
+
+
+def split_sections(items):
+    top = [i for i in items if i["score"] >= TOP_STORY_MIN_SCORE]
+    top = top[:MAX_TOP_STORIES]
+    top_ids = {id(i) for i in top}
+    sections = []
+    for cat in SECTION_ORDER:
+        rows = [i for i in items
+                if i["category"] == cat and id(i) not in top_ids]
+        if rows:
+            sections.append((cat, rows[:MAX_ITEMS_PER_SECTION]))
+    return top, sections
+
+
+def render_card(it, top=False):
+    when = ""
     if it["time"]:
         t = datetime.fromisoformat(it["time"]).strftime("%H:%M UTC")
-    return f"""<div class="item{' top' if top else ''}">
-<h3><a href="{html.escape(it['link'])}" target="_blank" rel="noopener">
-{html.escape(it['title'])}</a></h3>
-<p>{html.escape(it['summary'])}</p>
-<div class="meta"><b>{html.escape(it['source'])}</b>{' · ' + t if t else ''}</div>
-</div>"""
+        when = f' · <time datetime="{esc(it["time"])}">{t}</time>'
+    cat = slug(it["category"])
+    text = f"{it['title']} {it['summary']} {it['source']}".lower()
+    return f"""<article class="card{' card--top' if top else ''}" data-cat="{cat}" data-text="{esc(text)}">
+<span class="pill pill--{cat}">{esc(it['category'])}</span>
+<h3><a href="{esc(it['link'])}" target="_blank" rel="noopener">{esc(it['title'])}</a></h3>
+<p>{esc(it['summary'])}</p>
+<div class="meta"><b>{esc(it['source'])}</b>{when}</div>
+</article>"""
 
 
-def render_page(items, date_str, archive_link="archive/index.html"):
-    top = [i for i in items if i["score"] >= 4][:5]
-    top_keys = {id(i) for i in top}
-    body = []
+FAVICON = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' "
+           "viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' "
+           "fill='%230E3B2E'/%3E%3Ctext x='16' y='21' font-size='11' "
+           "font-family='Arial' font-weight='900' fill='%23FFD84D' "
+           "text-anchor='middle'%3ECPG%3C/text%3E%3C/svg%3E")
 
-    if top:
-        body.append('<h2 class="section">Top Stories</h2>')
-        body += [render_item(i, top=True) for i in top]
 
-    for cat, _ in CATEGORIES + [(FALLBACK_CATEGORY, [])]:
-        rows = [i for i in items
-                if i["category"] == cat and id(i) not in top_keys]
-        rows = rows[:MAX_ITEMS_PER_SECTION]
-        if rows:
-            body.append(f'<h2 class="section">{cat}</h2>')
-            body += [render_item(i) for i in rows]
-
-    if not body:
-        body = ['<div class="empty">No fresh stories collected in this '
-                'window. Check the run log for feed errors.</div>']
-
+def page_shell(title, root, body):
     return f"""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{SITE_TITLE} — {date_str}</title><style>{CSS}</style></head><body>
-<header><div class="wrap">
-<div class="masthead">{SITE_TITLE}</div>
-<div class="datebadge">{date_str}</div>
-<div class="subline">Auto-collected European consumer-goods headlines —
-M&amp;A, launches, retail moves &amp; regulation. Updated every morning.</div>
-<nav><a href="{archive_link}">Archive</a></nav>
-</div></header>
-<div class="wrap">{''.join(body)}
-<footer>Generated automatically from public RSS feeds. Headlines and
-summaries link to and belong to their original publishers.</footer>
-</div></body></html>"""
+<title>{esc(title)}</title>
+<meta name="description" content="Daily European consumer-goods news: M&amp;A, launches, retail moves and regulation.">
+<link rel="stylesheet" href="{root}assets/style.css">
+<link rel="icon" href="{FAVICON}">
+<script>try{{var t=localStorage.getItem("theme");if(t)document.documentElement.dataset.theme=t}}catch(e){{}}</script>
+</head><body data-root="{root}">
+{body}
+<script src="{root}assets/app.js" defer></script>
+</body></html>"""
 
 
-def render_archive_index(dates):
-    links = "".join(
-        f'<div class="item"><h3><a href="{d}.html">{d}</a></h3></div>'
-        for d in sorted(dates, reverse=True))
-    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{SITE_TITLE} — Archive</title><style>{CSS}</style></head><body>
-<header><div class="wrap"><div class="masthead">{SITE_TITLE}</div>
-<div class="datebadge">Archive</div>
-<nav><a href="../index.html">Back to today</a></nav></div></header>
-<div class="wrap">{links or '<div class="empty">No editions yet.</div>'}
-</div></body></html>"""
+def header(root, badge, stats="", active="today"):
+    def cur(name):
+        return ' aria-current="page"' if active == name else ""
+    return f"""<header class="masthead"><div class="wrap">
+<div class="masthead__top">
+<a class="brand" href="{root}index.html">{SITE_TITLE}</a>
+<nav class="nav">
+<a href="{root}index.html"{cur('today')}>Today</a>
+<a href="{root}archive/index.html"{cur('archive')}>Archive</a>
+<button class="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+</nav></div>
+<div class="datebadge">{esc(badge)}</div>
+<p class="subline">European consumer-goods headlines — M&amp;A, launches, retail moves &amp; regulation. Updated every morning.</p>
+{f'<p class="stats">{stats}</p>' if stats else ''}
+</div></header>"""
+
+
+def toolbar(chips, scope="edition"):
+    chip_html = "".join(
+        f'<button type="button" class="chip" data-filter="{key}" '
+        f'aria-pressed="{"true" if key == "all" else "false"}">'
+        f'{esc(label)}<span class="chip__n">{n}</span></button>'
+        for key, label, n in chips)
+    if scope == "edition":
+        placeholder = "Search this edition…"
+        extra = ('<label class="scope"><input type="checkbox" id="scope-all">'
+                 ' All editions</label>')
+    else:
+        placeholder = "Search every edition…"
+        extra = ""
+    chips_row = (f'<div class="chips" role="toolbar" aria-label="Filter by '
+                 f'section">{chip_html}</div>' if chips else "")
+    return f"""<div class="toolbar"><div class="wrap">
+<div class="searchrow" role="search">
+<span class="searchbox"><input id="q" type="search" placeholder="{placeholder}" autocomplete="off" aria-label="Search stories" data-scope="{scope}"><kbd>/</kbd></span>
+{extra}
+</div>
+{chips_row}
+</div></div>"""
+
+
+def render_page(items, stamp, root=""):
+    top, sections = split_sections(items)
+    shown = len(top) + sum(len(r) for _, r in sections)
+    sources = len({i["source"] for i in items})
+    stats = (f"<b>{shown}</b> stories from <b>{sources}</b> sources"
+             if shown else "")
+
+    chips = [("all", "All", shown)]
+    if top:
+        chips.append(("top", "Top Stories", len(top)))
+    chips += [(slug(cat), cat, len(rows)) for cat, rows in sections]
+
+    body = []
+    if top:
+        body.append('<section class="section" data-section="top">'
+                    '<h2 class="section__title">Top Stories</h2>'
+                    '<div class="grid grid--top">'
+                    + "".join(render_card(i, top=True) for i in top)
+                    + "</div></section>")
+    for cat, rows in sections:
+        body.append(f'<section class="section" data-section="{slug(cat)}">'
+                    f'<h2 class="section__title">{esc(cat)}</h2>'
+                    '<div class="grid">'
+                    + "".join(render_card(i) for i in rows)
+                    + "</div></section>")
+
+    if body:
+        body.append('<div class="empty" id="nomatch" hidden>No stories in '
+                    'this edition match your search. <button type="button" '
+                    'class="linkbtn" id="search-all-btn">Search all editions '
+                    '→</button></div>')
+    else:
+        body = [f'<div class="empty">No fresh stories were collected for '
+                f'this edition. Browse the <a href="{root}archive/index.html">'
+                f'archive</a> or search past editions above.</div>']
+
+    main = f"""{header(root, pretty_date(stamp), stats)}
+{toolbar(chips if shown else [])}
+<main class="wrap" id="main">
+<div id="results" class="results" hidden></div>
+<div id="edition">{''.join(body)}</div>
+<footer class="footer">Generated automatically from public RSS feeds.
+Headlines and summaries link to and belong to their original publishers.</footer>
+</main>
+<a href="#" class="totop" aria-label="Back to top">↑</a>"""
+    return page_shell(f"{SITE_TITLE} — {pretty_date(stamp)}", root, main)
+
+
+def render_archive_index(editions):
+    """editions: list of (stamp, items), newest first."""
+    months = {}
+    for stamp, items in editions:
+        months.setdefault(stamp[:7], []).append((stamp, items))
+
+    blocks = []
+    for month, eds in months.items():
+        label = datetime.strptime(month, "%Y-%m").strftime("%B %Y")
+        tiles = []
+        for stamp, items in eds:
+            d = datetime.strptime(stamp, "%Y-%m-%d")
+            lead = items[0]["title"] if items else "No stories collected"
+            tiles.append(
+                f'<a class="tile{" tile--empty" if not items else ""}" '
+                f'href="{stamp}.html"><span class="tile__day">'
+                f'{d.strftime("%a")}<b>{d.day}</b></span>'
+                f'<span class="tile__body"><span class="tile__count">'
+                f'{len(items)} stor{"y" if len(items) == 1 else "ies"}</span><span class="tile__lead">'
+                f'{esc(lead)}</span></span></a>')
+        blocks.append(f'<section class="section"><h2 class="section__title">'
+                      f'{label}</h2><div class="tiles">{"".join(tiles)}'
+                      f'</div></section>')
+
+    total = sum(len(i) for _, i in editions)
+    stats = f"<b>{len(editions)}</b> editions · <b>{total}</b> stories"
+    main = f"""{header("../", "Archive", stats, active="archive")}
+{toolbar([], scope="all")}
+<main class="wrap" id="main">
+<div id="results" class="results" hidden></div>
+<div id="edition">{''.join(blocks) or '<div class="empty">No editions yet.</div>'}</div>
+<footer class="footer">Generated automatically from public RSS feeds.</footer>
+</main>
+<a href="#" class="totop" aria-label="Back to top">↑</a>"""
+    return page_shell(f"{SITE_TITLE} — Archive", "../", main)
+
+
+def build_search_index(editions):
+    return [{"d": stamp, "t": it["title"], "l": it["link"],
+             "s": clean_text(it["summary"], 180), "src": it["source"],
+             "c": it["category"]}
+            for stamp, items in editions for it in items]
+
+
+def load_editions():
+    """All saved editions, newest first, re-classified with current rules."""
+    editions = []
+    for p in sorted((DOCS / "data").glob("*.json"), reverse=True):
+        data = json.loads(p.read_text(encoding="utf-8"))
+        items = sort_items([classify(it) for it in data["items"]])
+        editions.append((p.stem, items))
+    return editions
+
+
+def write_site(editions, render_days):
+    """Write archive pages for render_days, plus index, archive & search."""
+    (DOCS / "archive").mkdir(parents=True, exist_ok=True)
+    by_day = dict(editions)
+    for stamp in render_days:
+        (DOCS / "archive" / f"{stamp}.html").write_text(
+            render_page(by_day[stamp], stamp, root="../"), encoding="utf-8")
+    if editions:
+        latest, items = editions[0]
+        (DOCS / "index.html").write_text(
+            render_page(items, latest), encoding="utf-8")
+    (DOCS / "archive" / "index.html").write_text(
+        render_archive_index(editions), encoding="utf-8")
+    (DOCS / "search-index.json").write_text(
+        json.dumps(build_search_index(editions), ensure_ascii=False,
+                   separators=(",", ":")), encoding="utf-8")
 
 
 # ----------------------------- main ----------------------------------------
 
 def main():
-    items, failures = collect()
-    today = datetime.now(timezone.utc).strftime("%A, %d %B %Y")
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-    (DOCS / "archive").mkdir(parents=True, exist_ok=True)
     (DOCS / "data").mkdir(parents=True, exist_ok=True)
 
-    page = render_page(items, today)
-    (DOCS / "index.html").write_text(page, encoding="utf-8")
-    (DOCS / "archive" / f"{stamp}.html").write_text(
-        render_page(items, today, archive_link="index.html"),
-        encoding="utf-8")
+    if "--rebuild" in sys.argv:
+        editions = load_editions()
+        write_site(editions, [s for s, _ in editions])
+        print(f"Rebuilt {len(editions)} editions.")
+        return
 
-    dates = [p.stem for p in (DOCS / "archive").glob("*.html")
-             if p.stem != "index"]
-    (DOCS / "archive" / "index.html").write_text(
-        render_archive_index(dates), encoding="utf-8")
-
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    items, failures = collect(stamp)
     (DOCS / "data" / f"{stamp}.json").write_text(
         json.dumps({"date": stamp, "items": items, "failed_feeds": failures},
                    indent=1), encoding="utf-8")
 
+    write_site(load_editions(), [stamp])
     print(f"\nDone: {len(items)} items, {len(failures)} feed(s) failed.")
 
 
