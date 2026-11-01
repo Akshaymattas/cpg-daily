@@ -1,0 +1,10 @@
+{
+ "date": "2026-11-01",
+ "items": [],
+ "failed_feeds": [
+  "https://www.just-food.com/feed/",
+  "https://www.just-drinks.com/feed/",
+  "https://www.cosmeticsdesign-europe.com/arc/outboundfeeds/rss/",
+  "https://www.thegrocer.co.uk/rss"
+ ]
+}
